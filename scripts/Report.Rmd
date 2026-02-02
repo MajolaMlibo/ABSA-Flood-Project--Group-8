@@ -1,15 +1,115 @@
 ---
-title: "Flood Risk Analysis: Western Cape"
+title: 'Flood Risk Analysis: Western Cape'
 author: "Group 8"
-date: "`r Sys.Date()`"
-output: 
+date: '`r Sys.Date()`'
+output:
   word_document:
     toc: true
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
-library(tidyverse)
-library(knitr)
-perf <- read_csv("output/model_performance_metrics.csv")
-```
+### Executive Summary
+This report presents an analytical study conducted for CZR Insurance Group. 
+The main aim for this research was to predict the frequency and severity of flood events in the Western Cape on a monthly basis.
+EDA (Exploratory Data Analysis) and predictive modelling techniques were applied aided by the use of 
+provided historical climate and dam-level data to identify key drivers of flood risk and establish actionable
+business recommendations to mitigate financial exposure.
+
+### Introduction
+## Background
+CZR Insurance Group was founded in response to the increasing severity and frequency of flood events in Southern Africa.
+The organization seeks to develop data-driven approaches to better understand flood risk
+and protect communities from financial losses caused by climate-related disasters.
+
+## Objectives of the study
+- Analyse historical climate and dam-level data for the Western Cape
+- Identify trends that lead to flood
+- Develop predictive models for flood frequency and severity
+- Propose business strategies to reduce financial risk
+
+### Data Description 
+## Provided Data
+- Monthly climate variables for the Western Cape (2017-2021)
+- Dam-related variables for dams in the Western Cape (2017-2021)
+
+## Variables Overview
+Key variables include:
+- Temperature (max, min, avg)
+- Atmosperic Conditions (air pressure, wind speed, humidity)
+-  Dam metrics (water in dam, storage capacity, dam level)
+
+## Data Cleaning & Preparation
+This section focuses on:
+- handling missing values
+- dam data aggregation (where applicable)
+- time index construction (year and month)
+
+### Exploratory Data Analysis (EDA)
+## Temperature vs Precipitation
+![Average Temperature vs Precipitation](EDA\Images\scatterPlot.png)
+
+The scatter plot between temperature and precipitation shows points scattered across the plot with no clear pattern. 
+This indicates that there is no linear relationship between temperature and precipitation. 
+Therefore, higher temperatures do not necessarily lead to increased rainfall, 
+meaning temperature alone is not a reliable predictor of flood events
+
+## Monthly Temperature Trends
+![](output\BoxPlot.png)
+
+The boxplots illustrate seasonal temperature trends across months. 
+The blue boxes represent the interquartile range (IQR). 
+Temperatures are highest between months 1–3 and 11–12, corresponding to summer, and lowest between months 6–8, corresponding to winter. 
+This confirms clear seasonal temperature patterns in the Western Cape.
+
+## Correlation Analysis
+![](output\EDA\Images\CorrHeatMap.png)
+
+The correlation matrix shows that the temperature variables exhibit very strong positive correlations with one another, indicating potential multicollinearity. 
+Average temperature displays a strong negative correlation with air pressure. Additionally, humidity and precipitation show a positive relationship, 
+suggesting that higher humidity may lead to increased rainfall, which is relevant for flood risk analysis.
+
+### Predictive Modeling
+## Model Selection
+Three models were developed to predict monthly precipitation:
+- Generalized Linear Model (GLM)
+- Random Forest
+- ARIMA (Auto Regressive Integrated Moving Average)
+
+## Model Performance
+
+| Model | RMS | 
+|:---|:---:|
+Linear Regression | 14.887095162742119
+Random Forest | 16.712679729684645
+GLM Gamma | 14.832046592584199
+
+An evaluation was conducted on all three models using Root Mean Squared Error (RMSE) on the test data. 
+The GLM achieved the lowest RMSE of 14.83, 
+indicating it had the smallest average error in predicting rainfall
+
+![](output\Model_Comparison.png )
+
+The graph visualizes the perfomance of our models compared to the actual data. As observed, 
+the GML closely tracks the seasonal peaks of the actual data, confirming its reliability for forecasting.
+
+## Forecasting Results
+
+![](output\Forecast_2026.png)
+
+This graph represents the ARIMA(Auto Regressive Integrated Moving Average) model. 
+It tells us when we can expect the next flood. 
+From the graph we observed that June-August has the highest chances of experienceing floods(Winter) in each year. 
+The shaded area represents the confidence interval (we are 80%-95% sure the real rainfall will fall inside this area)
+
+### Key Insights
+
+- Precipitation and humidity are the strongest predictors of flood risk
+- Dam capacity plays a significant role in flood severity
+- Temperature influences flood risk indirectly through seasonal patterns
+
+### Business Recommendations
+
+Based on the analysis and predictive modeling, the following recommendations are proposed to CZR Insurance Group:
+- Implement dynamic pricing strategies that adjust premiums based on predicted flood risk.
+- Enhance customer education programs on flood preparedness, especially during high-risk months.
+- Invest in advanced monitoring systems for real-time flood risk assessment.
+- Collaborate with local governments to improve flood mitigation infrastructure.
