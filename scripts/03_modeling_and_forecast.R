@@ -1,105 +1,66 @@
-# Purpose: Load, clean, merge, and engineer features for Flood Risk Analysis
+pacman::p_load(tidyverse, caret, forecast, randomForest, glmnet)
 
-# 1. Load Libraries
-#if (!require("pacman")) install.packages("pacman")
-pacman::p_load(tidyverse, lubridate, zoo, readr, writexl)
+data <- read_csv("output/processed_data.csv", show_col_types = FALSE)
 
-# 2. Load Data
-# Added 'skip = 1' because the first row of the CSVs contains a title/metadata, not headers.
-# MODIFICATION: Using read_delim with delim = ";" to correctly parse the semicolon-separated files.
-climate_raw <- read_delim("data/climate_data.csv", delim = ";", show_col_types = FALSE, skip = 1)
-dams_raw <- read_delim("data/dam_data.csv", delim = ";", show_col_types = FALSE, skip = 1)
 
-summary(climate_raw )
-summary(dams_raw )
+# 1. Train-Test Split (Time-Ordered)
+split_idx <- floor(0.8 * nrow(data))
+train_data <- data[1:split_idx, ]
+test_data  <- data[(split_idx + 1):nrow(data), ]
 
-# 3. Data Cleaning: Climate Data
-# Select relevant columns and fix types
-# MODIFICATION: Refactored pipeline to filter first, then select columns by Index (position) 
-# instead of Name. This avoids errors caused by special characters (e.g., °) or encoding mismatches.
-# Index Mapping: 1=Province, 2=Year, 3=Month, 4=Max, 5=Min, 6=Avg, 7=Pressure, 8=Wind, 9=Humidity, 10=Precip
-climate_clean <- climate_raw %>%
-  filter(Province == "Western Cape") %>%
-  select(
-    Year = 2,
-    Month = 3,
-    Temp_Max = 4,
-    Temp_Min = 5,
-    Temp_Avg = 6,
-    Pressure = 7,
-    Wind_Speed = 8,
-    Humidity = 9,
-    Precipitation = 10
-  ) %>%
-  # MODIFICATION: Force numeric conversion. 
-  # If 'Month' remains character, the Season logic below fails (everything becomes "Spring").
-  mutate(across(everything(), as.numeric)) %>%
-  mutate(Date = make_date(Year, Month, 1)) %>%
-  select(Date, Year, Month, Temp_Max, Temp_Min, Temp_Avg, Pressure, Wind_Speed, Humidity, Precipitation)
+# 2. Model Training
+# Model A: Linear Regression (Baseline)
+# Removing Temp_Max/Min due to multicollinearity identified in EDA
+m_lm <- lm(Precipitation ~ Temp_Avg + Pressure + Wind_Speed + Humidity + Dam_Lag1 + Season, 
+           data = train_data)
 
-# 4. Data Cleaning: Dam Data
-# Dams are specific locations, but climate is provincial. 
-# We must aggregate dam levels to get a "Western Cape Water Stress" index.
-# MODIFICATION: Same index-based selection strategy for robustness.
-# Index Mapping: 1=Province, 2=Year, 3=Month, 6=Dam Level (%), 7=Dam Name
-dams_clean <- dams_raw %>%
-  filter(Province == "Western Cape") %>%
-  select(
-    Year = 2,
-    Month = 3,
-    Dam_Level_Pct = 6,
-    Dam_Name = 7
-  ) %>%
-  # MODIFICATION: Force numeric conversion for metrics, excluding the Name (text).
-  mutate(
-    Year = as.numeric(Year),
-    Month = as.numeric(Month),
-    Dam_Level_Pct = as.numeric(Dam_Level_Pct)
-  ) %>%
-  mutate(Date = make_date(Year, Month, 1)) %>%
-  # Aggregation strategy: Average dam level across the province to match climate granularity
-  group_by(Date) %>%
-  summarise(
-    Avg_Dam_Level = mean(Dam_Level_Pct, na.rm = TRUE),
-    Max_Dam_Level = max(Dam_Level_Pct, na.rm = TRUE), # Identifying if ANY dam is overflowing
-    .groups = 'drop'
-  )
+# Model B: Random Forest (Non-Linear)
+set.seed(2026)
+m_rf <- randomForest(Precipitation ~ Temp_Avg + Pressure + Wind_Speed + Humidity + Dam_Lag1, 
+                     data = train_data, ntree = 500)
 
-# 5. Merge Datasets
-full_data <- left_join(climate_clean, dams_clean, by = "Date")
+# Model C: GLM Gamma (Handles skewed, positive-only data)
+m_glm <- glm(Precipitation ~ Temp_Avg + Pressure + Wind_Speed + Humidity + Season, 
+             family = Gamma(link = "log"), 
+             data = train_data)
 
-# 6. Feature Engineering & Target Creation
-# JUSTIFICATION: The case study asks to predict "Flood Events" but does not provide a labeled column.
-# We define a "Flood Event" based on hydrological risk factors:
-# 1. High Precipitation (Severity proxy)
-# 2. Saturated Ground/Dams (Risk multiplier)
+# -------------------------------------------------------------------------
+# 3. Model Evaluation
+# -------------------------------------------------------------------------
+calc_rmse <- function(actual, pred) { sqrt(mean((actual - pred)^2)) }
 
-# Define Thresholds (derived from statistical distribution of the data)
-precip_90th <- quantile(full_data$Precipitation, 0.90, na.rm = TRUE)
+preds <- data.frame(
+  Actual = test_data$Precipitation,
+  LM = predict(m_lm, test_data),
+  RF = predict(m_rf, test_data),
+  GLM = predict(m_glm, test_data, type = "response")
+)
 
-full_data <- full_data %>%
-  mutate(
-    # Feature: Seasonality (Floods often seasonal)
-    Season = case_when(
-      Month %in% c(12, 1, 2) ~ "Summer",
-      Month %in% c(3, 4, 5) ~ "Autumn",
-      Month %in% c(6, 7, 8) ~ "Winter",
-      TRUE ~ "Spring"
-    ),
-    # Target 1: Flood_Severity (Continuous) -> Modeled by Precipitation amount
-    Flood_Severity = Precipitation,
-    
-    # Target 2: Flood_Frequency_Flag (Binary) -> Did a high-risk event occur?
-    # Logic: If rain is in top 10% AND dams are relatively full (>70%), risk is critical.
-    Flood_Event_Flag = if_else(Precipitation > precip_90th, 1, 0),
-    
-    # Lagged Variables (Predictors): Weather trends *precede* floods
-    Precip_Lag1 = lag(Precipitation, 1),
-    Precip_Lag2 = lag(Precipitation, 2),
-    Dam_Lag1 = lag(Avg_Dam_Level, 1)
-  ) %>%
-  drop_na() # Remove first 2 rows due to lags
+performance <- data.frame(
+  Model = c("Linear Regression", "Random Forest", "GLM (Gamma)"),
+  RMSE  = c(calc_rmse(preds$Actual, preds$LM),
+            calc_rmse(preds$Actual, preds$RF),
+            calc_rmse(preds$Actual, preds$GLM))
+)
 
-# 7. Save Processed Data
-write_csv(full_data, "output/processed_data.csv")
-message("Data preparation complete. File saved to output/processed_data.csv")
+write_csv(performance, "output/model_performance_metrics.csv")
+
+# -------------------------------------------------------------------------
+# 4. Forecast to 2026 (ARIMA)
+# -------------------------------------------------------------------------
+# Converting target variable to Time Series object (monthly frequency)
+ts_precip <- ts(data$Precipitation, start = c(data$Year[1], data$Month[1]), frequency = 12)
+
+# Fit Auto-ARIMA
+m_arima <- auto.arima(ts_precip, seasonal = TRUE)
+
+# Forecast 5 Years (60 Months)
+fc_2026 <- forecast(m_arima, h = 60)
+
+# Save Forecast Plot
+png("output/Forecast_2026.png", width = 1000, height = 600)
+plot(fc_2026, main = "Flood Severity Forecast (2022-2026)", 
+     ylab = "Projected Precipitation (mm)", xlab = "Year", col="darkblue")
+dev.off()
+
+message("Modeling complete. Forecast generated.")

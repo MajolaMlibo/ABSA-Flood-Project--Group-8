@@ -1,46 +1,53 @@
-# -------------------------------------------------------------------------
-# Script: 02_eda.R
-# Purpose: Visualise patterns, check assumptions, and generate report plots
-# -------------------------------------------------------------------------
-
-pacman::p_load(tidyverse, ggplot2, corrplot, gridExtra)
+pacman::p_load(tidyverse, ggplot2, corrplot, gridExtra, scales)
 
 data <- read_csv("output/processed_data.csv", show_col_types = FALSE)
 
-# 1. Time Series Analysis (Trend Identification)
-p1 <- ggplot(data, aes(x = Date)) +
-  geom_line(aes(y = Precipitation, color = "Precipitation"), linewidth = 1) +
-  geom_line(aes(y = Avg_Dam_Level, color = "Dam Level (%)"), linewidth = 1) +
+# 1. Time Series Analysis (Matches 'TimeSeries.png')
+# Visualizing the interaction between rainfall spikes and dam saturation
+p_ts <- ggplot(data, aes(x = Date)) +
+  geom_line(aes(y = Precipitation, color = "Precipitation (mm)"), linewidth = 1) +
+  geom_line(aes(y = Avg_Dam_Level, color = "Avg Dam Level (%)"), linewidth = 1) +
   scale_y_continuous(sec.axis = sec_axis(~., name = "Dam Level (%)")) +
-  labs(title = "Western Cape: Precipitation vs Dam Levels (2017-2021)",
-       subtitle = "High dam levels followed by rain spikes indicate flood risk",
-       y = "Precipitation (mm)", x = "Date") +
+  scale_color_manual(values = c("Precipitation (mm)" = "#1f77b4", "Avg Dam Level (%)" = "#d62728")) +
+  labs(title = "Historical Trends: Precipitation vs Dam Levels (2017-2021)",
+       x = "Date", y = "Precipitation (mm)", color = "Metric") +
   theme_minimal() +
-  scale_color_manual(values = c("Precipitation" = "blue", "Dam Level (%)" = "red"))
+  theme(legend.position = "bottom")
 
-ggsave("output/EDA_TimeSeries.png", plot = p1, width = 10, height = 6)
+ggsave("output/TimeSeries.png", plot = p_ts, width = 10, height = 6)
 
-# 2. Correlation Analysis (Multicollinearity Check)
-# Select numeric predictors
-num_vars <- data %>% select(Temp_Max, Temp_Min, Pressure, Wind_Speed, Humidity, Precipitation, Avg_Dam_Level)
-cor_matrix <- cor(num_vars)
+# 2. Correlation Heatmap (Matches 'CorrHeatMap.png')
+# Checking for multicollinearity among predictors
+num_vars <- data %>% 
+  select(Temp_Max, Temp_Min, Pressure, Wind_Speed, Humidity, Precipitation, Avg_Dam_Level)
 
-png("output/EDA_CorrelationMatrix.png", width = 800, height = 800)
-corrplot(cor_matrix, method = "color", type = "upper", order = "hclust", 
-         addCoef.col = "black", tl.col = "black", title = "Variable Correlation Matrix", mar=c(0,0,1,0))
+png("output/CorrHeatMap.png", width = 800, height = 800)
+corrplot(cor(num_vars), method = "color", type = "upper", order = "hclust", 
+         addCoef.col = "black", tl.col = "black", 
+         title = "Feature Correlation Matrix", mar=c(0,0,2,0))
 dev.off()
 
-# Insight Calculation for Report:
-# High correlation expected between Temp_Max and Temp_Min (Multicollinearity risk).
-# Strategy: Use PCA or select only one Temp variable, or use regularization (Elastic Net).
+# 3. Box Plot Analysis (Matches 'BoxPlot.png')
+# Seasonal distribution of rainfall
+p_box <- ggplot(data, aes(x = Season, y = Precipitation, fill = Season)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Seasonal Rainfall Distribution",
+       subtitle = "Winter shows significantly higher variance and median rainfall",
+       x = "Season", y = "Precipitation (mm)") +
+  theme_minimal() +
+  theme(legend.position = "none")
 
-# 3. Distribution of Target (Assumption Checking)
-p2 <- ggplot(data, aes(x = Precipitation)) +
-  geom_histogram(bins = 20, fill = "steelblue", color = "white") +
-  labs(title = "Distribution of Monthly Precipitation", x = "mm", y = "Count") +
+ggsave("output/BoxPlot.png", plot = p_box, width = 8, height = 6)
+
+# 4. Scatter Plot (Matches 'scatterPlot.png')
+# Relationship between Humidity and Rainfall (Linearity check)
+p_scat <- ggplot(data, aes(x = Humidity, y = Precipitation)) +
+  geom_point(alpha = 0.6, color = "darkblue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Correlation: Humidity vs Precipitation",
+       x = "Humidity (%)", y = "Precipitation (mm)") +
   theme_minimal()
 
-ggsave("output/EDA_Distribution.png", plot = p2, width = 6, height = 4)
-# Insight: Data is right-skewed. Gamma regression is appropriate for severity modeling.
+ggsave("output/scatterPlot.png", plot = p_scat, width = 8, height = 6)
 
-message("EDA complete. Plots saved to output/")
+message("EDA Complete. 4 Images saved to output/")
