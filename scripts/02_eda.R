@@ -1,53 +1,113 @@
-pacman::p_load(tidyverse, ggplot2, corrplot, gridExtra, scales)
+# Purpose: Perform Exploratory Data Analysis (EDA) and save visualizations to the output folder.
 
-data <- read_csv("output/processed_data.csv", show_col_types = FALSE)
+# Load libraries
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, lubridate, ggplot2, corrplot, gridExtra)
 
-# 1. Time Series Analysis (Matches 'TimeSeries.png')
-# Visualizing the interaction between rainfall spikes and dam saturation
-p_ts <- ggplot(data, aes(x = Date)) +
-  geom_line(aes(y = Precipitation, color = "Precipitation (mm)"), linewidth = 1) +
-  geom_line(aes(y = Avg_Dam_Level, color = "Avg Dam Level (%)"), linewidth = 1) +
-  scale_y_continuous(sec.axis = sec_axis(~., name = "Dam Level (%)")) +
-  scale_color_manual(values = c("Precipitation (mm)" = "#1f77b4", "Avg Dam Level (%)" = "#d62728")) +
-  labs(title = "Historical Trends: Precipitation vs Dam Levels (2017-2021)",
-       x = "Date", y = "Precipitation (mm)", color = "Metric") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
+data_path <- "output/processed_data.csv" 
+output_dir <- "output"
 
-ggsave("output/TimeSeries.png", plot = p_ts, width = 10, height = 6)
+# Create the output directory if it does not exist
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+  message("Created output directory: ", output_dir)
+}
 
-# 2. Correlation Heatmap (Matches 'CorrHeatMap.png')
-# Checking for multicollinearity among predictors
-num_vars <- data %>% 
-  select(Temp_Max, Temp_Min, Pressure, Wind_Speed, Humidity, Precipitation, Avg_Dam_Level)
+# Loading Data
+if (file.exists(data_path)) {
+  df <- read.csv(data_path)
+  message("Data loaded successfully.")
+} else {
+  # Fallback: If running from the 'scripts' folder, try the parent directory
+  if (file.exists(paste0("../", data_path))) {
+     data_path <- paste0("../", data_path)
+     output_dir <- paste0("../", output_dir)
+     df <- read.csv(data_path)
+     message("Data loaded successfully (adjusted for scripts directory).")
+  } else {
+     stop("Error: processed_data.csv not found. Please ensure your working directory is the project root.")
+  }
+}
 
-png("output/CorrHeatMap.png", width = 800, height = 800)
-corrplot(cor(num_vars), method = "color", type = "upper", order = "hclust", 
-         addCoef.col = "black", tl.col = "black", 
-         title = "Feature Correlation Matrix", mar=c(0,0,2,0))
-dev.off()
+# Ensure Date column is correctly formatted
+if ("Date" %in% names(df)) {
+  df$Date <- as.Date(df$Date)
+}
 
-# 3. Box Plot Analysis (Matches 'BoxPlot.png')
-# Seasonal distribution of rainfall
-p_box <- ggplot(data, aes(x = Season, y = Precipitation, fill = Season)) +
-  geom_boxplot(alpha = 0.7) +
-  labs(title = "Seasonal Rainfall Distribution",
-       subtitle = "Winter shows significantly higher variance and median rainfall",
-       x = "Season", y = "Precipitation (mm)") +
-  theme_minimal() +
-  theme(legend.position = "none")
+numeric_vars <- df %>% select_if(is.numeric)
 
-ggsave("output/BoxPlot.png", plot = p_box, width = 8, height = 6)
+if (ncol(numeric_vars) > 1) {
+  png(filename = file.path(output_dir, "CorrHeatMap.png"), width = 800, height = 800)
+  
+  # Calculate correlation matrix
+  corr_matrix <- cor(numeric_vars, use = "complete.obs")
+  
+  # Plot heatmap
+  corrplot(corr_matrix, 
+           method = "color", 
+           type = "upper", 
+           tl.col = "black", 
+           tl.srt = 45, 
+           addCoef.col = "black", # Add numbers
+           title = "Correlation Matrix", 
+           mar = c(0,0,1,0))
+  
+  dev.off()
+}
 
-# 4. Scatter Plot (Matches 'scatterPlot.png')
-# Relationship between Humidity and Rainfall (Linearity check)
-p_scat <- ggplot(data, aes(x = Humidity, y = Precipitation)) +
-  geom_point(alpha = 0.6, color = "darkblue") +
-  geom_smooth(method = "lm", color = "red", se = FALSE) +
-  labs(title = "Correlation: Humidity vs Precipitation",
-       x = "Humidity (%)", y = "Precipitation (mm)") +
-  theme_minimal()
+# Time Series Plot
+# Plotting Precipitation over time to spot any historical trends.
+message("Generating Time Series Plot...")
+ts_y_var <- "Precipitation" 
 
-ggsave("output/scatterPlot.png", plot = p_scat, width = 8, height = 6)
+if (ts_y_var %in% names(df)) {
+  p_ts <- ggplot(df, aes(x = Date, y = .data[[ts_y_var]])) +
+    geom_line(color = "#0072B2", size = 1) +
+    labs(title = paste("Time Series Analysis of", ts_y_var),
+         subtitle = "Historical rainfall trends over time",
+         x = "Date",
+         y = ts_y_var) +
+    theme_minimal() +
+    theme(plot.title = element_text(face = "bold", size = 14))
+  
+  ggsave(filename = file.path(output_dir, "TimeSeries.png"), plot = p_ts, width = 10, height = 6)
+}
 
-message("EDA Complete. 4 Images saved to output/")
+# Box Plot
+# Checking the distribution of Average Temperature by month.
+box_y_var <- "Temp_Avg"
+
+if ("Date" %in% names(df) & box_y_var %in% names(df)) {
+  # Extract Month
+  df$Month_Name <- month(df$Date, label = TRUE, abbr = TRUE)
+  
+  p_box <- ggplot(df, aes(x = Month_Name, y = .data[[box_y_var]], fill = Month_Name)) +
+    geom_boxplot(alpha = 0.7) +
+    labs(title = paste("Monthly Distribution of", box_y_var),
+         x = "Month",
+         y = box_y_var) +
+    theme_minimal() +
+    theme(legend.position = "none",
+          plot.title = element_text(face = "bold"))
+  
+  ggsave(filename = file.path(output_dir, "BoxPlot.png"), plot = p_box, width = 10, height = 6)
+}
+
+# Scatter Plot
+# Investigating the relationship between Average Temperature and Precipitation.
+message("Generating Scatter Plot...")
+scatter_x_var <- "Temp_Avg"     # Predictor
+scatter_y_var <- "Precipitation" # Response
+
+if (scatter_x_var %in% names(df) & scatter_y_var %in% names(df)) {
+  p_scatter <- ggplot(df, aes(x = .data[[scatter_x_var]], y = .data[[scatter_y_var]])) +
+    geom_point(alpha = 0.6, color = "#D55E00") +
+    geom_smooth(method = "lm", color = "black", se = FALSE) + # Add trend line
+    labs(title = paste("Relationship:", scatter_x_var, "vs", scatter_y_var),
+         subtitle = paste("Correlation analysis between", scatter_x_var, "and", scatter_y_var),
+         x = scatter_x_var,
+         y = scatter_y_var) +
+    theme_minimal()
+  
+  ggsave(filename = file.path(output_dir, "scatterPlot.png"), plot = p_scatter, width = 8, height = 6)
+}
